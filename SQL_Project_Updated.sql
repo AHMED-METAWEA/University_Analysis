@@ -331,3 +331,207 @@ JOIN Course_Sections cs ON i.instructor_id = cs.instructor_id
 JOIN Enrollments e ON cs.section_id = e.section_id
 GROUP BY i.full_name
 ORDER BY total_students DESC;
+
+
+-- Generate 80+ More Students
+DROP PROCEDURE IF EXISTS generate_students;
+
+DELIMITER $$
+
+CREATE PROCEDURE generate_students()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+
+    WHILE i <= 80 DO
+        INSERT INTO Students (full_name, gender, birth_date, dept_id, enroll_year)
+        VALUES (
+            CONCAT('Student_', i),
+            IF(MOD(i, 2) = 0, 'Male', 'Female'),
+            DATE_ADD('2000-01-01', INTERVAL i DAY),
+            FLOOR(1 + (RAND() * 5)),
+            FLOOR(2019 + (RAND() * 4))
+        );
+
+        SET i = i + 1;
+    END WHILE;
+
+END $$
+
+DELIMITER ;
+
+CALL generate_students();
+
+
+-- Generate Enrollments
+DROP PROCEDURE IF EXISTS generate_enrollments;
+DELIMITER $$
+
+CREATE PROCEDURE generate_enrollments()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+
+    WHILE i <= 100 DO
+        INSERT INTO Enrollments (student_id, section_id, grade)
+        VALUES (
+            FLOOR(1 + (RAND() * 98)),  -- students
+            FLOOR(1 + (RAND() * 20)),  -- sections
+            ROUND(50 + (RAND() * 50),1) -- grades 50–100
+        );
+
+        SET i = i + 1;
+    END WHILE;
+END $$
+
+DELIMITER ;
+
+CALL generate_enrollments();
+
+
+-- Generate Attendance
+DROP PROCEDURE IF EXISTS generate_attendance;
+DELIMITER $$
+
+CREATE PROCEDURE generate_attendance()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+
+    WHILE i <= 200 DO
+        INSERT INTO Attendance (student_id, section_id, attendance_date, status)
+        VALUES (
+            FLOOR(1 + (RAND() * 98)),
+            FLOOR(1 + (RAND() * 20)),
+            DATE_ADD('2022-01-01', INTERVAL (i * 2) DAY),
+            IF(RAND() > 0.3, 'Present', 'Absent')
+        );
+
+        SET i = i + 1;
+    END WHILE;
+END $$
+
+DELIMITER ;
+
+CALL generate_attendance();
+
+
+-- This query finds top-performing students based on both grades and attendance rate
+SELECT s.full_name,
+       ROUND(AVG(e.grade),2) AS avg_grade,
+       ROUND(SUM(CASE WHEN a.status='Present' THEN 1 ELSE 0 END) * 100.0 / COUNT(a.attendance_id),2) AS attendance_rate
+FROM Students s
+JOIN Enrollments e ON s.student_id = e.student_id
+JOIN Attendance a ON s.student_id = a.student_id
+GROUP BY s.full_name
+HAVING avg_grade > 80 AND attendance_rate > 80
+ORDER BY avg_grade DESC;
+
+
+-- This query ranks departments based on average student grades
+SELECT d.dept_name,
+       ROUND(AVG(e.grade),2) AS avg_grade
+FROM Departments d
+JOIN Courses c ON d.dept_id = c.dept_id
+JOIN Course_Sections cs ON c.course_id = cs.course_id
+JOIN Enrollments e ON cs.section_id = e.section_id
+GROUP BY d.dept_name
+ORDER BY avg_grade DESC;
+
+
+-- This query classifies courses based on their average grades (difficulty level)
+SELECT c.course_name,
+       ROUND(AVG(e.grade),2) AS avg_grade,
+       CASE 
+           WHEN AVG(e.grade) < 70 THEN 'Hard'
+           WHEN AVG(e.grade) BETWEEN 70 AND 85 THEN 'Medium'
+           ELSE 'Easy'
+       END AS difficulty
+FROM Courses c
+JOIN Course_Sections cs ON c.course_id = cs.course_id
+JOIN Enrollments e ON cs.section_id = e.section_id
+GROUP BY c.course_name
+ORDER BY avg_grade ASC;
+
+
+
+-- This query checks if student performance improves over time (by year)
+SELECT s.full_name,
+       cs.year,
+       ROUND(AVG(e.grade),2) AS avg_grade
+FROM Students s
+JOIN Enrollments e ON s.student_id = e.student_id
+JOIN Course_Sections cs ON e.section_id = cs.section_id
+GROUP BY s.full_name, cs.year
+ORDER BY s.full_name, cs.year;
+
+
+-- This query finds courses with the highest number of enrolled students
+SELECT c.course_name,
+       COUNT(e.student_id) AS total_students
+FROM Courses c
+JOIN Course_Sections cs ON c.course_id = cs.course_id
+JOIN Enrollments e ON cs.section_id = e.section_id
+GROUP BY c.course_name
+ORDER BY total_students DESC;
+
+
+-- This query evaluates instructors based on their students' average grades
+SELECT i.full_name,
+       COUNT(e.student_id) AS total_students,
+       ROUND(AVG(e.grade),2) AS avg_grade
+FROM Instructors i
+JOIN Course_Sections cs ON i.instructor_id = cs.instructor_id
+JOIN Enrollments e ON cs.section_id = e.section_id
+GROUP BY i.full_name
+ORDER BY avg_grade DESC;
+
+
+-- This query identifies students who may be at risk (low performance and attendance)
+SELECT s.full_name,
+       ROUND(AVG(e.grade),2) AS avg_grade,
+       ROUND(SUM(CASE WHEN a.status='Present' THEN 1 ELSE 0 END) * 100.0 / COUNT(a.attendance_id),2) AS attendance_rate
+FROM Students s
+JOIN Enrollments e ON s.student_id = e.student_id
+JOIN Attendance a ON s.student_id = a.student_id
+GROUP BY s.full_name
+HAVING avg_grade < 60 AND attendance_rate < 50;
+
+
+-- This query finds the semester and year with the highest number of enrollments
+SELECT cs.year,
+       cs.semester,
+       COUNT(e.enrollment_id) AS total_enrollments
+FROM Course_Sections cs
+JOIN Enrollments e ON cs.section_id = e.section_id
+GROUP BY cs.year, cs.semester
+ORDER BY total_enrollments DESC
+LIMIT 1;
+
+
+-- This query shows the relationship between attendance and average grades
+SELECT 
+    CASE 
+        WHEN attendance_rate >= 80 THEN 'High Attendance'
+        WHEN attendance_rate >= 50 THEN 'Medium Attendance'
+        ELSE 'Low Attendance'
+    END AS attendance_group,
+    ROUND(AVG(avg_grade),2) AS avg_grade
+FROM (
+    SELECT s.student_id,
+           ROUND(AVG(e.grade),2) AS avg_grade,
+           ROUND(SUM(CASE WHEN a.status='Present' THEN 1 ELSE 0 END) * 100.0 / COUNT(a.attendance_id),2) AS attendance_rate
+    FROM Students s
+    JOIN Enrollments e ON s.student_id = e.student_id
+    JOIN Attendance a ON s.student_id = a.student_id
+    GROUP BY s.student_id
+) AS sub
+GROUP BY attendance_group;
+
+
+-- This query finds which department has the highest number of enrollments
+SELECT d.dept_name,
+       COUNT(e.enrollment_id) AS total_enrollments
+FROM Departments d
+JOIN Courses c ON d.dept_id = c.dept_id
+JOIN Course_Sections cs ON c.course_id = cs.course_id
+JOIN Enrollments e ON cs.section_id = e.section_id
+GROUP BY d.dept_name
+ORDER BY total_enrollments DESC;
